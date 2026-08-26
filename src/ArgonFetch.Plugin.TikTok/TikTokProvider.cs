@@ -16,15 +16,12 @@ namespace ArgonFetch.Plugin.TikTok
     /// </summary>
     public sealed class TikTokProvider : ISourceProvider
     {
-        // The site that does the actual work. Kept in one place because it is the part most
-        // likely to need replacing - these services come and go.
         private const string Service = "https://tmate.cc";
 
         private static readonly HtmlParser Parser = new();
 
         public string Id => "tiktok";
 
-        // tiktok.com and the vm./vt. short links people actually share.
         public IReadOnlyList<string> UrlPatterns =>
         [
             @"^https?://([\w-]+\.)*tiktok\.com/",
@@ -47,8 +44,6 @@ namespace ArgonFetch.Plugin.TikTok
                 ])
             };
 
-            // Set per request rather than on the client: the client is shared with everything
-            // else fetching media, and a cookie left on it would travel to unrelated requests.
             request.Headers.TryAddWithoutValidation("Cookie", $"session_data={session}");
 
             using var response = await httpClient.SendAsync(request, cancellationToken);
@@ -62,8 +57,6 @@ namespace ArgonFetch.Plugin.TikTok
 
             if (string.IsNullOrWhiteSpace(download))
             {
-                // Nothing to download usually means the video is private or gone. Declining lets
-                // the ordinary fetch say so in its own words, which are better than ours.
                 return ProviderOutcome.Declined;
             }
 
@@ -72,8 +65,6 @@ namespace ArgonFetch.Plugin.TikTok
                 Clean(document.QuerySelector("p")?.TextContent),
                 Clean(document.QuerySelector("img")?.GetAttribute("src")),
                 [
-                    // One file, already carrying both tracks, so it is a single stream rather
-                    // than a choice between any.
                     new MediaStream(new Uri(Clean(download)), IsAudio: false)
                     {
                         Label = "Video with audio",
@@ -83,9 +74,6 @@ namespace ArgonFetch.Plugin.TikTok
                 ]));
         }
 
-        /// <summary>
-        /// Reads the one-time token the form is submitted with, and the cookie it belongs to.
-        /// </summary>
         private static async Task<(string Token, string? Session)> StartSessionAsync(
             HttpClient httpClient,
             CancellationToken cancellationToken)
@@ -104,10 +92,6 @@ namespace ArgonFetch.Plugin.TikTok
             return (document.QuerySelector("input[name='token']")?.GetAttribute("value") ?? string.Empty, session);
         }
 
-        /// <summary>
-        /// Page text, scrubbed. Takes null because the selectors feeding it return null whenever
-        /// the element is absent, which is a normal outcome rather than a fault.
-        /// </summary>
         internal static string Clean(string? input)
         {
             if (string.IsNullOrWhiteSpace(input))
@@ -120,7 +104,6 @@ namespace ArgonFetch.Plugin.TikTok
             input = Regex.Replace(input, @"\\[\""/]", string.Empty);
             input = Regex.Replace(input, @"\s+", " ").Trim();
 
-            // The button's own label runs into the title on this page.
             if (input.Contains("Download without Watermark"))
                 input = input.Split("Download without Watermark")[0];
 

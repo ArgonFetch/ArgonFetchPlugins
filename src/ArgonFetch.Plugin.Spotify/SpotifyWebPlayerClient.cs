@@ -10,10 +10,6 @@ namespace ArgonFetch.Plugin.Spotify
 {
     public interface ISpotifyWebPlayerClient
     {
-        /// <summary>
-        /// Every track on a playlist, or null when the web player's own API could not be reached.
-        /// Null is a normal outcome the caller is expected to handle, not a fault.
-        /// </summary>
         Task<IReadOnlyList<SpotifyCollectionItem>?> TryGetPlaylistTracksAsync(string playlistId, CancellationToken cancellationToken = default);
     }
 
@@ -33,9 +29,6 @@ namespace ArgonFetch.Plugin.Spotify
     /// </summary>
     public class SpotifyWebPlayerClient : ISpotifyWebPlayerClient
     {
-        // A mirror that tracks the rotating TOTP secrets. Hosted on Gitea rather than GitHub
-        // because the GitHub copy this used to read has since been taken down - which is also
-        // the argument against pinning a secret into this file.
         private const string SecretsUrl = "https://code.thetadev.de/ThetaDev/spotify-secrets/raw/branch/main/secrets/secretDict.json";
         private const string ServerTimeUrl = "https://open.spotify.com/api/server-time";
         private const string WebPlayerUrl = "https://open.spotify.com/";
@@ -45,18 +38,12 @@ namespace ArgonFetch.Plugin.Spotify
         private const string SecretsCacheKey = "spotify-web-player-secrets";
         private const string HashCacheKey = "spotify-web-player-hash";
 
-        // The player itself asks for a hundred at a time.
         private const int PageSize = 100;
 
-        // A stop for a playlist that is either enormous or a response that never stops paging.
         private const int MaxTracks = 10_000;
 
-        // Enough to cover the handful of scripts the page loads, without turning a changed
-        // page into a download of everything it mentions.
         private const int MaxBundlesToSearch = 5;
 
-        // Every script the page pulls in. Which of them holds the query depends on how the
-        // bundle was split that day, so they are tried in turn rather than guessed at.
         private static readonly Regex BundleUrls = new(
             @"https://open\.spotifycdn\.com/cdn/build/web-player/[^""'\s]+\.js",
             RegexOptions.Compiled);
@@ -67,8 +54,6 @@ namespace ArgonFetch.Plugin.Spotify
         private const string BrowserUserAgent =
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36";
 
-        // Persisted queries appear in the bundle as the operation name, the word "query", and the
-        // hash the server will accept for it.
         private static readonly Regex PersistedQuery = new(
             @"""(\w+)"",""query"",""([0-9a-f]{64})""",
             RegexOptions.Compiled);
@@ -101,9 +86,6 @@ namespace ArgonFetch.Plugin.Spotify
                 {
                     var page = await FetchPageAsync(playlistId, tracks.Count, token, hash, cancellationToken);
 
-                    // The session is held until something says otherwise. A long playlist can
-                    // outlive its token, so one refusal buys one fresh token and one retry -
-                    // never a loop, which is how a rejected session turns into a mint storm.
                     if (page is { Rejected: true } && !repaired)
                     {
                         repaired = true;
@@ -117,7 +99,6 @@ namespace ArgonFetch.Plugin.Spotify
                     total = page.Total;
                     tracks.AddRange(page.Items);
 
-                    // A page that returns nothing would otherwise loop until the cap.
                     if (page.Items.Count == 0)
                         break;
                 }
@@ -132,8 +113,6 @@ namespace ArgonFetch.Plugin.Spotify
             }
             catch (Exception ex)
             {
-                // Any of it can break - the secret mirror, the bundle's shape, the query hash -
-                // and the caller has a smaller answer it can fall back to.
                 _logger.LogWarning(ex, "Could not read playlist {Id} through the web player API", playlistId);
                 return null;
             }
@@ -166,8 +145,6 @@ namespace ArgonFetch.Plugin.Spotify
                 Content = new StringContent(payload, Encoding.UTF8, "application/json")
             };
 
-            // The bearer token alone: the player also sends a client-token, but the API does not
-            // ask for one, and it is the single value with no runtime source to read it from.
             request.Headers.TryAddWithoutValidation("authorization", $"Bearer {token}");
             request.Headers.TryAddWithoutValidation("accept", "application/json");
 
@@ -218,7 +195,6 @@ namespace ArgonFetch.Plugin.Spotify
             return new PlaylistPage(items, total, Rejected: false);
         }
 
-        /// <summary>One page of a playlist, or the news that the session was refused.</summary>
         private record PlaylistPage(IReadOnlyList<SpotifyCollectionItem> Items, int Total, bool Rejected)
         {
             public static readonly PlaylistPage SessionRejected = new([], 0, Rejected: true);
@@ -232,8 +208,6 @@ namespace ArgonFetch.Plugin.Spotify
             var uri = data.TryGetProperty("uri", out var uriValue) ? uriValue.GetString() : null;
             var id = uri?.Split(':').LastOrDefault();
 
-            // Local files and unavailable entries have no track id, so nothing could be fetched
-            // for them later.
             if (string.IsNullOrWhiteSpace(id) || uri?.StartsWith("spotify:track:", StringComparison.Ordinal) != true)
                 return null;
 
@@ -266,9 +240,6 @@ namespace ArgonFetch.Plugin.Spotify
                 $"https://open.spotify.com/track/{id}");
         }
 
-        /// <summary>
-        /// An anonymous access token, kept until shortly before it expires.
-        /// </summary>
         private async Task<string> GetAccessTokenAsync(CancellationToken cancellationToken, bool forceRefresh = false)
         {
             if (!forceRefresh && _cache.TryGetValue(_context.CacheKey(TokenCacheKey), out string? cached) && !string.IsNullOrEmpty(cached))
@@ -278,9 +249,6 @@ namespace ArgonFetch.Plugin.Spotify
 
             var response = await MintTokenAsync(httpClient, refreshSecret: false, cancellationToken);
 
-            // A refused mint usually means Spotify moved to a newer password version while the
-            // one in hand still looked fine. Re-reading the secret is the repair; doing it on
-            // every mint would hammer the mirror for nothing.
             if (!response.IsSuccessStatusCode)
             {
                 _logger.LogInformation("Spotify refused the token request ({Status}); re-reading the password secret.", (int)response.StatusCode);
@@ -299,8 +267,6 @@ namespace ArgonFetch.Plugin.Spotify
                 ? DateTimeOffset.FromUnixTimeMilliseconds(expiry.GetInt64())
                 : DateTimeOffset.UtcNow.AddMinutes(30);
 
-            // Held until it is nearly spent - a minute of margin so a request never starts with a
-            // token that expires mid-flight. Everything else reuses it; nothing re-mints on a timer.
             _cache.Set(_context.CacheKey(TokenCacheKey), token, expiresAt.AddMinutes(-1));
 
             return token;
@@ -372,10 +338,6 @@ namespace ArgonFetch.Plugin.Spotify
             }
         }
 
-        /// <summary>
-        /// The web player's time-based password: each byte of the secret is mixed with its own
-        /// position, and the decimal spelling of the result is the key.
-        /// </summary>
         internal static string GenerateTotp(IReadOnlyList<int> secret, long unixSeconds)
         {
             var mixed = string.Concat(secret.Select((value, index) => (value ^ ((index % 33) + 9)).ToString()));
@@ -399,10 +361,6 @@ namespace ArgonFetch.Plugin.Spotify
             return (binary % 1_000_000).ToString("D6");
         }
 
-        /// <summary>
-        /// A GET carrying a browser agent, for the pages Spotify lays out differently
-        /// depending on who is asking.
-        /// </summary>
         private static async Task<string> GetAsBrowserAsync(HttpClient httpClient, string url, CancellationToken cancellationToken)
         {
             using var request = new HttpRequestMessage(HttpMethod.Get, url);
@@ -414,10 +372,6 @@ namespace ArgonFetch.Plugin.Spotify
             return await response.Content.ReadAsStringAsync(cancellationToken);
         }
 
-        /// <summary>
-        /// The hash Spotify will accept for the playlist query, read out of the player's own
-        /// bundle. It changes whenever they edit the query, so it is scraped rather than pinned.
-        /// </summary>
         private async Task<string> GetFetchPlaylistHashAsync(CancellationToken cancellationToken)
         {
             if (_cache.TryGetValue(_context.CacheKey(HashCacheKey), out string? cached) && !string.IsNullOrEmpty(cached))
@@ -430,8 +384,6 @@ namespace ArgonFetch.Plugin.Spotify
             var scripts = BundleUrls.Matches(home)
                 .Select(match => match.Value)
                 .Distinct()
-                // The player pack first: it is the one that has carried the query so far, and
-                // trying it first usually means downloading exactly one file.
                 .OrderByDescending(url => url.Contains("/web-player.", StringComparison.Ordinal))
                 .Take(MaxBundlesToSearch)
                 .ToList();

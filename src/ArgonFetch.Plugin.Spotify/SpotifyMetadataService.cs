@@ -6,22 +6,10 @@ using System.Text.RegularExpressions;
 
 namespace ArgonFetch.Plugin.Spotify
 {
-    /// <summary>
-    /// The track details ArgonFetch needs from a Spotify link. The audio itself never comes
-    /// from Spotify - these fields only seed the YouTube Music search and fill the DTO.
-    /// </summary>
     public record SpotifyTrackMetadata(string Title, string Artist, string? CoverUrl, long DurationMs);
 
-    /// <summary>One entry of an album or playlist, with everything matching needs.</summary>
     public record SpotifyCollectionItem(string Title, string Artist, long DurationMs, string TrackUrl);
 
-    /// <summary>
-    /// An album or playlist and what is on it.
-    /// </summary>
-    /// <param name="MayBeTruncated">
-    /// Whether the source stopped short of the whole thing. The page this is read from returns
-    /// at most a hundred entries, and says nothing about how many it left out.
-    /// </param>
     public record SpotifyCollectionMetadata(
         string Title,
         string? Author,
@@ -33,29 +21,15 @@ namespace ArgonFetch.Plugin.Spotify
     {
         Task<SpotifyTrackMetadata> GetTrackAsync(string trackUrl, CancellationToken cancellationToken = default);
 
-        /// <summary>
-        /// The contents of an album or playlist page.
-        /// </summary>
         Task<SpotifyCollectionMetadata> GetCollectionAsync(string collectionUrl, CancellationToken cancellationToken = default);
     }
 
-    /// <summary>
-    /// Reads Spotify track details from the OpenGraph tags on the public track page.
-    /// <para>
-    /// This replaces the authenticated Web API client. Only the title, artist and cover art
-    /// were ever used, and all three are served unauthenticated, so requiring client
-    /// credentials to reach them meant Spotify links did not work out of the box.
-    /// </para>
-    /// </summary>
     public class SpotifyMetadataService : ISpotifyMetadataService
     {
-        // The embed page is a Next.js app; everything it renders is in this one script tag.
         private static readonly Regex NextData = new(
             "<script id=\"__NEXT_DATA__\" type=\"application/json\">(.*?)</script>",
             RegexOptions.Compiled | RegexOptions.Singleline);
 
-        // What the embed page returns at most. A listing of exactly this many may have more
-        // behind it that the page did not send.
         private const int EmbedTrackLimit = 100;
 
         private static readonly Regex PlaylistUrl = new(@"/playlist/([A-Za-z0-9]+)", RegexOptions.Compiled);
@@ -98,8 +72,6 @@ namespace ArgonFetch.Plugin.Spotify
 
             if (string.IsNullOrWhiteSpace(title))
             {
-                // A track page always carries og:title. Its absence means a consent wall,
-                // a redirect, or a layout change rather than an empty title.
                 throw new ArgumentException($"Could not read track details from {requestUrl}.");
             }
 
@@ -112,9 +84,6 @@ namespace ArgonFetch.Plugin.Spotify
                     requestUrl, description);
             }
 
-            // Duration is not in the OpenGraph tags, but the embed page carries it and needs no
-            // auth either. It lets the matcher reject same-title recordings of the wrong length,
-            // so it is worth the extra request - a failure here just weakens matching.
             var durationMs = await TryGetDurationMsAsync(requestUrl, httpClient, cancellationToken);
 
             return new SpotifyTrackMetadata(title, artist ?? string.Empty, coverUrl, durationMs);
@@ -147,19 +116,6 @@ namespace ArgonFetch.Plugin.Spotify
             }
         }
 
-        /// <summary>
-        /// og:description is a middot-separated list, e.g.
-        /// "Rick Astley · Whenever You Need Somebody · Song · 1987", where the artist comes first.
-        /// </summary>
-        /// <summary>
-        /// Reads an album or playlist from the embed page.
-        /// <para>
-        /// The OpenGraph tags name the release but never list what is on it. The embed page
-        /// carries the whole track list as JSON - title, artist and duration each - and needs no
-        /// token, no persisted query and no session, which the Web API and its GraphQL endpoint
-        /// all do.
-        /// </para>
-        /// </summary>
         public async Task<SpotifyCollectionMetadata> GetCollectionAsync(string collectionUrl, CancellationToken cancellationToken = default)
         {
             var httpClient = _context.CreateHttpClient(rotateProxy: false);
@@ -208,7 +164,6 @@ namespace ArgonFetch.Plugin.Spotify
                     var uri = Text(track, "uri");
                     var id = uri?.Split(':').LastOrDefault();
 
-                    // An entry with no id cannot be fetched later, so it is not worth listing.
                     if (string.IsNullOrWhiteSpace(id))
                         continue;
 
@@ -223,8 +178,6 @@ namespace ArgonFetch.Plugin.Spotify
             if (items.Count == 0)
                 throw new ArgumentException($"Spotify listed no tracks for {collectionUrl}.");
 
-            // Cover art is absent from the embed payload but present in the OpenGraph tags on the
-            // ordinary page, which is one more request rather than a different mechanism.
             var coverUrl = await TryGetCoverUrlAsync(collectionUrl, httpClient, cancellationToken);
 
             return new SpotifyCollectionMetadata(
@@ -235,9 +188,6 @@ namespace ArgonFetch.Plugin.Spotify
                 items.Count == EmbedTrackLimit);
         }
 
-        /// <summary>
-        /// The entity object the embed page is rendered from, which holds the track list.
-        /// </summary>
         private static JsonElement ReadEmbeddedEntity(string html, string collectionUrl)
         {
             var match = NextData.Match(html);
@@ -257,7 +207,6 @@ namespace ArgonFetch.Plugin.Spotify
                 .GetProperty("data")
                 .GetProperty("entity");
 
-            // Cloned because the document is disposed on the way out of this method.
             return entity.Clone();
         }
 
@@ -283,13 +232,11 @@ namespace ArgonFetch.Plugin.Spotify
             }
             catch (Exception ex)
             {
-                // A listing without its picture is still a listing.
                 _logger.LogDebug(ex, "Could not read the cover art for {Url}", collectionUrl);
                 return null;
             }
         }
 
-        /// <summary>The playlist id in a url, or null when it is not a playlist link.</summary>
         private static string? PlaylistId(string url)
         {
             var match = PlaylistUrl.Match(url);
@@ -297,7 +244,6 @@ namespace ArgonFetch.Plugin.Spotify
             return match.Success ? match.Groups[1].Value : null;
         }
 
-        /// <summary>The embed page for any Spotify entity url.</summary>
         private static string EmbedUrl(string url)
         {
             var normalized = url.Split('?')[0].TrimEnd('/');
@@ -334,11 +280,6 @@ namespace ArgonFetch.Plugin.Spotify
             return string.IsNullOrWhiteSpace(content) ? null : content;
         }
 
-        /// <summary>
-        /// Accepts the URL forms users actually paste - localized paths like /intl-de/track/{id},
-        /// tracking query strings, and spotify:track:{id} URIs - and reduces them to the
-        /// canonical track page.
-        /// </summary>
         private static string NormalizeTrackUrl(string trackUrl)
         {
             if (string.IsNullOrWhiteSpace(trackUrl))
@@ -378,7 +319,6 @@ namespace ArgonFetch.Plugin.Spotify
                     $"'{trackUrl}' does not look like a Spotify track link.", nameof(trackUrl));
             }
 
-            // Drop query strings; they carry share/tracking parameters, not identity.
             return $"https://open.spotify.com/track/{segments[trackIndex + 1]}";
         }
     }

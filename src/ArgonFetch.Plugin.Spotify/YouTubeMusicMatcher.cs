@@ -2,30 +2,12 @@
 
 namespace ArgonFetch.Plugin.Spotify
 {
-    /// <summary>
-    /// A YouTube Music search result, reduced to what matching needs.
-    /// </summary>
-    /// <param name="Title">Candidate track title.</param>
-    /// <param name="Artist">Credited artist, if the source gave one.</param>
-    /// <param name="DurationSec">Length in seconds, 0 when unknown.</param>
-    /// <param name="Details">Release text (album, credits). Only its bracketed parts are read.</param>
     public record MatchCandidate(string Title, string? Artist, long DurationSec, string Details = "");
 
-    /// <summary>
-    /// Picks the YouTube Music result that is actually the requested recording.
-    /// <para>
-    /// Ported from Snepilatch's YouTubeMusicSource. Taking the first search hit matches covers,
-    /// karaoke versions and instrumentals as readily as the real track, so the request is scored
-    /// against each candidate on title, artist and duration instead.
-    /// </para>
-    /// </summary>
     public static class YouTubeMusicMatcher
     {
         internal const long DurationToleranceSec = 30L;
 
-        // Tighter than the tolerance used when a title matched. Nothing but the length is
-        // identifying the track on that path, and another track by the same artist is often
-        // within a few seconds of the one that was asked for.
         internal const long CreditOnlyToleranceSec = 4L;
         internal const long DurationBucketSec = 5L;
         internal const double MinTitleScore = 0.8;
@@ -44,9 +26,6 @@ namespace ArgonFetch.Plugin.Spotify
         private static readonly Regex Whitespace = new(@"\s+", RegexOptions.Compiled);
         private static readonly Regex LeadingHyphen = new(@"(^|\s)-+", RegexOptions.Compiled);
 
-        /// <summary>
-        /// Null rather than a guess: the wrong recording is worse than none, and the caller skips.
-        /// </summary>
         public static MatchCandidate? BestMatch(
             IReadOnlyList<MatchCandidate> candidates,
             string wantTitle,
@@ -55,13 +34,6 @@ namespace ArgonFetch.Plugin.Spotify
             bool officialShelf = false) =>
             RankMatches(candidates, wantTitle, wantArtist, durationMs, officialShelf).FirstOrDefault();
 
-        /// <summary>
-        /// Every candidate that could be the requested recording, best first.
-        /// <para>
-        /// A caller with a way to check its pick - fetching it and reading the real duration -
-        /// can walk this list instead of taking the first and hoping.
-        /// </para>
-        /// </summary>
         public static IReadOnlyList<MatchCandidate> RankMatches(
             IReadOnlyList<MatchCandidate> candidates,
             string wantTitle,
@@ -77,39 +49,18 @@ namespace ArgonFetch.Plugin.Spotify
             var asked = new HashSet<string>(MarkerWords(wantTitle), StringComparer.Ordinal);
             asked.UnionWith(MarkerWords(wantArtist));
 
-            // Title words only. Including the artist's words would let "- MEMcho Solo Ver. -"
-            // count as plainer than the group recording, because the soloist is one of the
-            // credited artists and so appears in asked.
             var askedTitleWords = new HashSet<string>(MarkerWords(wantTitle), StringComparer.Ordinal);
 
             var titled = candidates.Where(candidate =>
                 (want.Count == 0 || TitleScore(candidate.Title, want) >= MinTitleScore) &&
-                // The release text too, not just the title: an instrumental cut usually carries the
-                // original's exact title and artist, and only the release it sits on says what it is.
-                // Bracketed only, though - an album is where a release declares itself, and scanning
-                // the whole run made a plain album name disqualify every candidate. ReworkMarkers
-                // holds bare instrument nouns, so "Guitar Songs" or "Piano Man" read as reworks and
-                // the track became unresolvable on this source.
                 !AddsRework($"{candidate.Title} {BracketedIn(candidate.Details)}", asked))
                 .ToList();
 
-            // The songs shelf is YouTube Music's own catalogue, so a row on it is a release rather
-            // than somebody's upload, and a credit that does not match ours is usually the same
-            // recording filed under a different name. When no candidate carries the wanted name at
-            // all the credit is telling us nothing, and rejecting on it throws the release away for
-            // good.
-            //
-            // The videos shelf is where anyone can upload, which is what the artist check is for, so
-            // there a miss stays a miss. Same on any shelf as soon as one candidate does carry the
-            // name: the credit discriminates again, and the ones that lack it lose.
             var byArtist = titled.Where(c => ArtistMatches(c.Artist, wantArtistWords)).ToList();
             var viable = officialShelf && byArtist.Count == 0 ? titled : byArtist;
 
             var ordered = viable.Select((candidate, index) => (candidate, index));
 
-            // Duration is a tiebreaker, not a requirement. Not every search backend reports it,
-            // and filtering on it when it is missing discards every candidate and resolves
-            // nothing.
             var timed = viable.Where(c => c.DurationSec > 0).ToList();
 
             if (durationMs <= 0L || timed.Count == 0)
@@ -123,9 +74,6 @@ namespace ArgonFetch.Plugin.Spotify
 
             var wantSec = durationMs / 1000;
 
-            // YouTube Music ranks the canonical upload first. An instrumental runs to the same length
-            // as the vocal take, so picking purely by the smallest duration difference let a second or
-            // two of noise outrank that order; only a clearly better fit (a whole bucket) may.
             return ordered
                 .Where(x => x.candidate.DurationSec > 0 &&
                             Math.Abs(x.candidate.DurationSec - wantSec) <= DurationToleranceSec)
@@ -136,17 +84,6 @@ namespace ArgonFetch.Plugin.Spotify
                 .ToList();
         }
 
-        /// <summary>
-        /// Candidates that match on credit alone, best first, for a caller that can verify its
-        /// pick another way.
-        /// <para>
-        /// A release is often filed under a translated name - Spotify says "REVENGE OF B" where
-        /// YouTube Music says the Japanese original - and the two titles share no words at all,
-        /// so title matching rejects every candidate and the track cannot be fetched. The credit
-        /// still matches, and a duration read from the fetched result settles which one it is,
-        /// so this is only safe for a caller that performs that check.
-        /// </para>
-        /// </summary>
         public static IReadOnlyList<MatchCandidate> RankByCreditOnly(
             IReadOnlyList<MatchCandidate> candidates,
             string wantArtist,
@@ -171,9 +108,6 @@ namespace ArgonFetch.Plugin.Spotify
 
             var wantSec = durationMs / 1000;
 
-            // Closest first rather than search order: the artist's other tracks are in this list
-            // too, and one of them being a few seconds from the right length is not a reason to
-            // prefer it to an exact match.
             return timed
                 .Where(c => Math.Abs(c.DurationSec - wantSec) <= CreditOnlyToleranceSec)
                 .OrderBy(c => Math.Abs(c.DurationSec - wantSec))
@@ -192,35 +126,17 @@ namespace ArgonFetch.Plugin.Spotify
         internal static int ExtraWords(string candidateTitle, ISet<string> asked) =>
             MarkerWords(candidateTitle).Count(word => !asked.Contains(word));
 
-        /// <summary>
-        /// True when the candidate advertises a rework the request never asked for. Asking for a
-        /// track that genuinely is a remix keeps working, because the marker is then in asked too.
-        /// </summary>
         internal static bool AddsRework(string candidateTitle, ISet<string> asked) =>
             MarkerWords(candidateTitle).Any(w => ReworkMarkers.Contains(w) && !asked.Contains(w));
 
-        /// <summary>
-        /// The bracketed parts of a run of release text - "Artist - Album (Instrumental) - 3:45"
-        /// yields "Instrumental".
-        /// </summary>
         internal static string BracketedIn(string text) =>
             string.Join(" ", Bracketed.Matches(text ?? string.Empty).Select(m => m.Groups[1].Value));
 
-        /// <summary>
-        /// The artist to treat as asked for. Blanks the placeholder that reaches here whenever a
-        /// request carried no artist name: it is not a credit, so requiring candidates to share a
-        /// word with it rejects every real result and the track stops resolving at all.
-        /// </summary>
         internal static string RealArtist(string artist) =>
             string.Equals(artist, UnknownPlaceholder, StringComparison.OrdinalIgnoreCase)
                 ? string.Empty
                 : artist ?? string.Empty;
 
-        /// <summary>
-        /// Like Words but keeps bracketed text - which is where a release says what it is.
-        /// Dropping it made "(Instrumental)" indistinguishable from the real recording: same
-        /// title, same artist, same length.
-        /// </summary>
         private static HashSet<string> MarkerWords(string s) =>
             new(NonAlphanumeric
                     .Replace((s ?? string.Empty).ToLowerInvariant(), " ")
@@ -228,16 +144,6 @@ namespace ArgonFetch.Plugin.Spotify
                     .Where(w => !string.IsNullOrWhiteSpace(w)),
                 StringComparer.Ordinal);
 
-        /// <summary>
-        /// The strongest signal against a cover: a piano rendition is uploaded by whoever played it,
-        /// not by the artist. A source may credit several artists where YouTube credits one, so
-        /// sharing a single name is enough. An unknown artist on either side cannot rule anything out.
-        /// </summary>
-        /// <param name="allowScriptMismatch">
-        /// Whether credits written in different scripts may be assumed to match. They may when a
-        /// title match already identified the recording; they may not when the credit is the only
-        /// evidence, or a karaoke label credited in one script passes for any artist in another.
-        /// </param>
         internal static bool ArtistMatches(string? candidateArtist, ISet<string> wantArtist, bool allowScriptMismatch = true)
         {
             if (wantArtist.Count == 0) return true;
@@ -245,17 +151,11 @@ namespace ArgonFetch.Plugin.Spotify
             var have = Words(candidateArtist ?? string.Empty);
             if (have.Count == 0) return true;
 
-            // Two scripts cannot be compared by word overlap at all. Romanised names appear in the
-            // original script on the other side, they share nothing, and every real candidate was
-            // thrown away. Skipping the check costs nothing the other filters do not already cover:
-            // an upload in a different script from the artist we asked for is not what a cover or a
-            // karaoke channel looks like.
             if (allowScriptMismatch && HasLatin(have) != HasLatin(wantArtist)) return true;
 
             return have.Any(h => wantArtist.Any(w => NearlyEqual(h, w)));
         }
 
-        /// <summary>Normalize has already lowercased, so a Latin letter is enough to tell the scripts apart.</summary>
         private static bool HasLatin(IEnumerable<string> words) =>
             words.Any(word => word.Any(c => c >= 'a' && c <= 'z'));
 
@@ -279,7 +179,6 @@ namespace ArgonFetch.Plugin.Spotify
             return want.Count(w => have.Any(h => NearlyEqual(h, w))) / (double)want.Count;
         }
 
-        /// <summary>Equal, or one edit apart, so a spelling variant like "Tobbs" / "Tobbss" still matches.</summary>
         private static bool NearlyEqual(string a, string b)
         {
             if (a == b) return true;

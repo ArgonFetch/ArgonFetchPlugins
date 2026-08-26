@@ -2,11 +2,6 @@ using ArgonFetch.Plugin.Spotify;
 
 namespace ArgonFetch.Plugin.Spotify.Tests
 {
-    /// <summary>
-    /// Pins the matching rules. Every bypass in the matcher is a scar from a real track that
-    /// resolved to the wrong recording or to nothing at all, and until now none of them was
-    /// held in place by anything.
-    /// </summary>
     public class YouTubeMusicMatcherTests
     {
         private const long ThreeMinutesMs = 180_000;
@@ -37,8 +32,6 @@ namespace ArgonFetch.Plugin.Spotify.Tests
         [Fact]
         public void BestMatch_ReturnsNull_RatherThanTheWrongRecording()
         {
-            // Nothing here is the requested song. A wrong file is worse than a failed fetch,
-            // because the caller cannot tell it went wrong.
             var result = Match([Candidate("Together Forever"), Candidate("Whenever You Need Somebody")]);
 
             Assert.Null(result);
@@ -52,8 +45,6 @@ namespace ArgonFetch.Plugin.Spotify.Tests
         [InlineData("Never Gonna Give You Up [Slowed + Reverb]")]
         public void BestMatch_RejectsReworksNobodyAskedFor(string title)
         {
-            // These carry the exact title, the exact artist and near enough the exact length,
-            // so nothing but the marker itself tells them apart from the real recording.
             Assert.Null(Match([Candidate(title)]));
         }
 
@@ -81,16 +72,12 @@ namespace ArgonFetch.Plugin.Spotify.Tests
         [Fact]
         public void BestMatch_RejectsAnUploadCreditedToSomebodyElse()
         {
-            // The strongest signal against a cover: someone else uploaded it.
             Assert.Null(Match([Candidate("Never Gonna Give You Up", artist: "Some Karaoke Channel")]));
         }
 
         [Fact]
         public void BestMatch_AcceptsAMismatchedCreditOnTheOfficialShelf_WhenNoCandidateCarriesTheName()
         {
-            // The songs shelf is YouTube Music's own catalogue, so a row there is a release
-            // rather than an upload, and a differing credit is usually the same recording filed
-            // under another name. Rejecting on it would throw the release away for good.
             var relabelled = Candidate("Never Gonna Give You Up", artist: "RickAstleyVEVO Official");
 
             Assert.Same(relabelled, Match([relabelled], officialShelf: true));
@@ -108,9 +95,6 @@ namespace ArgonFetch.Plugin.Spotify.Tests
         [Fact]
         public void BestMatch_DoesNotCompareCreditsAcrossScripts()
         {
-            // A romanised name and the original script share no words, which used to throw away
-            // every real candidate. An upload in another script is not what a karaoke channel
-            // looks like, so the other filters carry the weight here.
             var japanese = new MatchCandidate("Say It", "ヨルシカ", ThreeMinutesSec);
 
             Assert.Same(japanese, Match([japanese], title: "Say It", artist: "Yorushika"));
@@ -119,8 +103,6 @@ namespace ArgonFetch.Plugin.Spotify.Tests
         [Fact]
         public void BestMatch_IgnoresTheCreditWhenTheRequestHasNoRealArtist()
         {
-            // "Unknown" reaches the matcher whenever a request carried no artist. Treating it as
-            // a credit rejects every real result.
             var candidate = Candidate("Some Song", artist: "Whoever Uploaded It");
 
             Assert.Same(candidate, Match([candidate], title: "Some Song", artist: "Unknown"));
@@ -138,8 +120,6 @@ namespace ArgonFetch.Plugin.Spotify.Tests
         [Fact]
         public void BestMatch_KeepsSearchOrderWhenLengthsAreEquallyClose()
         {
-            // YouTube Music ranks the canonical upload first, and a second of noise must not
-            // outrank that. Only a clearly better fit may.
             var first = Candidate("Never Gonna Give You Up", durationSec: 182);
             var second = Candidate("Never Gonna Give You Up", durationSec: 179);
 
@@ -149,8 +129,6 @@ namespace ArgonFetch.Plugin.Spotify.Tests
         [Fact]
         public void BestMatch_IgnoresLengthWhenTheSourceReportsNone()
         {
-            // Not every search backend reports a duration. Filtering on it then discards
-            // every candidate and the track resolves to nothing.
             var noDuration = Candidate("Never Gonna Give You Up", durationSec: 0);
 
             Assert.Same(noDuration, Match([noDuration]));
@@ -159,7 +137,6 @@ namespace ArgonFetch.Plugin.Spotify.Tests
         [Fact]
         public void BestMatch_IgnoresLengthWhenTheRequestHasNone()
         {
-            // Spotify's duration is scraped and can be missing; matching still has to work.
             var candidate = Candidate("Never Gonna Give You Up", durationSec: 400);
 
             Assert.Same(candidate, Match([candidate], durationMs: 0));
@@ -168,7 +145,6 @@ namespace ArgonFetch.Plugin.Spotify.Tests
         [Fact]
         public void BestMatch_RejectsACandidateFarFromTheAskedForLength()
         {
-            // An hour-long upload carrying the right title is a mix, not the track.
             Assert.Null(Match([Candidate("Never Gonna Give You Up", durationSec: 3600)]));
         }
 
@@ -189,8 +165,6 @@ namespace ArgonFetch.Plugin.Spotify.Tests
         [Fact]
         public void BestMatch_PrefersThePlainestTitleWhenNothingElseSeparatesCandidates()
         {
-            // Search returns the radio edit above the album version. Where neither carries a
-            // duration, without this the edit wins on search order alone.
             var radioEdit = Candidate("One More Time (Radio Edit)", artist: "Daft Punk", durationSec: 0);
             var albumVersion = Candidate("One More Time", artist: "Daft Punk", durationSec: 0);
 
@@ -202,8 +176,6 @@ namespace ArgonFetch.Plugin.Spotify.Tests
         [Fact]
         public void BestMatch_RejectsASoloRecordingOfAGroupTrack()
         {
-            // A solo re-recording is a different performance, and search ranks these above the
-            // group version whenever the soloist is one of the credited artists.
             const string group = "B小町 ルビー（CV：伊駒ゆりえ）、有馬かな（CV：潘めぐみ）、MEMちょ（CV：大久保瑠美）";
             var solo = new MatchCandidate("サインはB -MEMちょ Solo Ver.-", "B小町 MEMちょ（CV：大久保瑠美）", 0);
 
@@ -213,9 +185,6 @@ namespace ArgonFetch.Plugin.Spotify.Tests
         [Fact]
         public void RankByCreditOnly_KeepsATranslatedTitleThatSharesNoWords()
         {
-            // Spotify says "REVENGE OF B" where YouTube Music says the Japanese original, and the
-            // two share nothing to match on. The credit is all that is left, so the caller has to
-            // confirm the pick by its length afterwards.
             const string wanted = "B小町, ルビー(CV:伊駒ゆりえ), 有馬かな(CV:潘めぐみ), MEMちょ(CV:大久保瑠美)";
             const string credited = "B小町 ルビー（CV：伊駒ゆりえ）、有馬かな（CV：潘めぐみ）、MEMちょ（CV：大久保瑠美）";
 
@@ -240,8 +209,6 @@ namespace ArgonFetch.Plugin.Spotify.Tests
         [Fact]
         public void RankByCreditOnly_TakesTheClosestLengthRatherThanTheFirstThatFits()
         {
-            // The artist's other tracks are in the same search, and one of them landing a few
-            // seconds from the right length is not a reason to prefer it to an exact match.
             const string artist = "B小町 ルビー（CV：伊駒ゆりえ）";
 
             var nearby = new MatchCandidate("深海52Hz", artist, 175, artist);
@@ -256,8 +223,6 @@ namespace ArgonFetch.Plugin.Spotify.Tests
         [Fact]
         public void RankByCreditOnly_RefusesToGuessWhenNoArtistWasGiven()
         {
-            // Without a credit there is nothing left to match on at all, and returning everything
-            // would hand the caller a list of arbitrary tracks to pick from by length alone.
             var candidate = new MatchCandidate("Anything At All", "Whoever", 0);
 
             Assert.Empty(YouTubeMusicMatcher.RankByCreditOnly([candidate], "Unknown"));
@@ -278,7 +243,6 @@ namespace ArgonFetch.Plugin.Spotify.Tests
                 "ryo (supercell), Kaguya(cv.Yuko Natsuyoshi), Yachiyo Runami(cv.Saori Hayami)",
                 100);
 
-            // The same remix sung by someone else, which is not what was asked for.
             var otherVersion = new MatchCandidate(
                 "\u30EF\u30FC\u30EB\u30C9\u30A4\u30BA\u30DE\u30A4\u30F3 (Anime ver.) [CPK! Remix] - World Is Mine (Anime Ver.) [CPK! Remix] (feat. ChoKaguyaHime)",
                 "supercell und Yachiyo Runami(cv.Saori Hayami)",
@@ -299,8 +263,6 @@ namespace ArgonFetch.Plugin.Spotify.Tests
         }
 
         [Theory]
-        // A leading hyphen is a search operator - it tells YouTube to drop every result
-        // containing the word, so the shelf came back empty for tracks named this way.
         [InlineData("Artist", "-topic", "Artist topic")]
         [InlineData("Artist", "Spider-Man Theme", "Artist Spider-Man Theme")]
         [InlineData("", "Song", "Song")]

@@ -2,11 +2,6 @@ using ArgonFetch.Plugin.Spotify;
 
 namespace ArgonFetch.Plugin.Spotify.Tests
 {
-    /// <summary>
-    /// The one-time password the Spotify web player signs its token request with. Worth pinning
-    /// down: the whole playlist path fails at the first request if a byte of this is wrong, and
-    /// the failure looks like a network problem rather than a wrong password.
-    /// </summary>
     public class SpotifyTotpTests
     {
         // Shape and length of a real secret, without being one - the live secret rotates and is
