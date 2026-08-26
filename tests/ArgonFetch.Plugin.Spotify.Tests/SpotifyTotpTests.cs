@@ -4,8 +4,7 @@ namespace ArgonFetch.Plugin.Spotify.Tests
 {
     public class SpotifyTotpTests
     {
-        // Shape and length of a real secret, without being one - the live secret rotates and is
-        // fetched at runtime, so a copy here would only go stale.
+        // Shaped like a real secret without being one; the live one rotates.
         private static readonly int[] Secret =
             [12, 56, 76, 33, 88, 44, 88, 33, 78, 78, 11, 66, 22, 22, 55, 69, 54];
 
@@ -20,9 +19,7 @@ namespace ArgonFetch.Plugin.Spotify.Tests
         [Fact]
         public void GenerateTotp_HoldsForThirtySecondsAtATime()
         {
-            // The step is what makes Spotify's clock worth asking for: a server that is a minute
-            // out mints a code from the wrong window and is refused.
-            // 1700000010 is itself a window boundary, so the window it opens runs to ...039.
+            // 1700000010 is itself a window boundary, so its window runs to ...039.
             var atStart = SpotifyWebPlayerClient.GenerateTotp(Secret, 1700000010);
 
             Assert.Equal(atStart, SpotifyWebPlayerClient.GenerateTotp(Secret, 1700000039));

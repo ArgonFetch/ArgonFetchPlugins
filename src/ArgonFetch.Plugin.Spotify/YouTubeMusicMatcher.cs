@@ -44,8 +44,7 @@ namespace ArgonFetch.Plugin.Spotify
             var want = TitleWords(wantTitle);
             var wantArtistWords = Words(RealArtist(wantArtist));
 
-            // Read the request the same way as the candidate, brackets included: asking for "Sonne
-            // (Remix)" must keep the remix, and that marker only survives in the bracket-keeping split.
+            // Brackets kept: asking for "Sonne (Remix)" must keep the remix.
             var asked = new HashSet<string>(MarkerWords(wantTitle), StringComparer.Ordinal);
             asked.UnionWith(MarkerWords(wantArtist));
 
@@ -114,15 +113,8 @@ namespace ArgonFetch.Plugin.Spotify
                 .ToList();
         }
 
-        /// <summary>
-        /// Words the candidate's title carries that nobody asked for.
-        /// <para>
-        /// Search returns the radio edit, the remaster and the twelve-inch mix alongside the
-        /// album version, all with the right title and the right credit. Where no duration is
-        /// available to separate them, the plainest title is the one that was asked for.
-        /// Counted with brackets kept, because that is where the qualifier lives.
-        /// </para>
-        /// </summary>
+        // Where duration cannot separate a radio edit from the album version, the plainest
+        // title is the one that was asked for.
         internal static int ExtraWords(string candidateTitle, ISet<string> asked) =>
             MarkerWords(candidateTitle).Count(word => !asked.Contains(word));
 
@@ -159,18 +151,9 @@ namespace ArgonFetch.Plugin.Spotify
         private static bool HasLatin(IEnumerable<string> words) =>
             words.Any(word => word.Any(c => c >= 'a' && c <= 'z'));
 
-        /// <summary>
-        /// Share of the wanted title's words the candidate carries.
-        /// <para>
-        /// Counted with the candidate's brackets kept. The two sides write a version qualifier
-        /// differently - Spotify hyphenates it into the name, "World is Mine - Kaguya&amp;Yachiyo
-        /// Runami ver. - CPK! Remix", where YouTube Music brackets it - so dropping the brackets
-        /// erased the half of the candidate that the request was mostly made of, and an exact
-        /// match scored a third. Keeping them cannot cost a match either way: the score measures
-        /// how much of the wanted title the candidate carries, so words the candidate has and
-        /// nobody asked for were never counted against it.
-        /// </para>
-        /// </summary>
+        // Brackets kept: Spotify hyphenates a version into the name where YouTube Music
+        // brackets it, so dropping them scored an exact match a third. Extra words never count
+        // against a candidate, so keeping them cannot cost a match.
         internal static double TitleScore(string candidateTitle, ISet<string> want)
         {
             if (want.Count == 0) return 0.0;
@@ -207,32 +190,16 @@ namespace ArgonFetch.Plugin.Spotify
             return edits + (longer.Length - i) + (shorter.Length - j) <= 1;
         }
 
-        /// <summary>
-        /// What to search for, with the operator meaning taken out of a leading hyphen.
-        /// <para>
-        /// YouTube reads "-word" as "exclude everything containing word". A track whose name opens
-        /// with a hyphen therefore asked search to drop every result carrying that word, and the
-        /// shelf came back empty. Only a hyphen that opens a word is an operator, so a name like
-        /// Spider-Man keeps its own.
-        /// </para>
-        /// </summary>
+        // YouTube reads a leading "-word" as "exclude everything containing word", which
+        // emptied the shelf for tracks named that way. Spider-Man keeps its own.
         public static string SearchQuery(string artist, string title)
         {
             var joined = string.Join(" ", new[] { artist, title }.Where(s => !string.IsNullOrWhiteSpace(s)));
             return LeadingHyphen.Replace(joined, "$1").Trim();
         }
 
-        /// <summary>
-        /// The words of the wanted title a candidate has to carry, which stops at the feature credit.
-        /// <para>
-        /// Some sources write the guest into the track name where YouTube Music puts it in brackets
-        /// that Normalize then strips off the candidate, so a three-word wanted title was scored
-        /// against a one-word candidate and never came near MinTitleScore. Only the part before the
-        /// credit is required; a candidate that does spell the guest out still matches, because the
-        /// score measures how much of the wanted title the candidate carries and never penalises
-        /// extra words.
-        /// </para>
-        /// </summary>
+        // Stops at the feature credit: sources write the guest into the name where YouTube
+        // Music brackets it, and normalisation then strips it off the candidate.
         internal static HashSet<string> TitleWords(string title)
         {
             var beforeCredit = SplitOnFeature(Normalize(title));

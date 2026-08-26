@@ -59,8 +59,7 @@ namespace ArgonFetch.Plugin.Spotify.Tests
         [Fact]
         public void BestMatch_MatchesWhenTheRequestSpellsOutAFeatureCreditAndTheCandidateDoesNot()
         {
-            // Sources write the guest into the track name where YouTube Music puts it in
-            // brackets, which the candidate then loses to normalisation.
+            // The guest is in the name here, in brackets there, and normalisation drops it.
             var candidate = Candidate("Stay", artist: "The Kid LAROI");
 
             Assert.Same(candidate, Match(
@@ -232,9 +231,7 @@ namespace ArgonFetch.Plugin.Spotify.Tests
         [Fact]
         public void RankMatches_FindsATrackWhoseVersionSpotifyHyphenatesAndYouTubeBrackets()
         {
-            // Real rows from a YouTube Music search, and the Spotify track that failed to
-            // resolve against them. Spotify writes the version into the name after a hyphen;
-            // YouTube Music brackets it and puts the romanisation after the Japanese original.
+            // Real search rows. Spotify hyphenates the version, YouTube Music brackets it.
             const string wantTitle = "World is Mine - Kaguya&Yachiyo Runami ver. - CPK! Remix";
             const string wantArtist = "ryo (supercell), Kaguya(cv.Yuko Natsuyoshi), Yachiyo Runami(cv.Saori Hayami)";
 
@@ -258,7 +255,6 @@ namespace ArgonFetch.Plugin.Spotify.Tests
         {
             var want = YouTubeMusicMatcher.TitleWords("Sonne - Live Version");
 
-            // Bracketed on the candidate, hyphenated on the request: the same words either way.
             Assert.Equal(1.0, YouTubeMusicMatcher.TitleScore("Sonne (Live Version)", want));
         }
 

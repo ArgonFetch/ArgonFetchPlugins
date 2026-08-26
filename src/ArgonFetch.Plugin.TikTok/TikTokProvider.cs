@@ -7,13 +7,7 @@ using ArgonFetch.Abstractions;
 
 namespace ArgonFetch.Plugin.TikTok
 {
-    /// <summary>
-    /// TikTok videos, fetched without the watermark.
-    /// <para>
-    /// Fetched here rather than redirected: what comes back is one file already carrying both
-    /// picture and sound, so there is nothing for the ordinary path to add.
-    /// </para>
-    /// </summary>
+    // One file already carrying both picture and sound, so yt-dlp is not run.
     public sealed class TikTokProvider : ISourceProvider
     {
         private const string Service = "https://tmate.cc";
@@ -29,8 +23,7 @@ namespace ArgonFetch.Plugin.TikTok
 
         public async Task<ProviderOutcome> PrepareAsync(Uri url, IProviderContext context, CancellationToken cancellationToken)
         {
-            // Not rotated: the token below is issued against a session cookie, and answering
-            // from a different address than the one it was handed to is refused.
+            // The token is issued against a session cookie; another address is refused.
             var httpClient = context.CreateHttpClient(rotateProxy: false);
 
             var (token, session) = await StartSessionAsync(httpClient, cancellationToken);

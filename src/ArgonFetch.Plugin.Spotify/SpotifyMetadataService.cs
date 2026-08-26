@@ -133,9 +133,8 @@ namespace ArgonFetch.Plugin.Spotify
 
             var items = new List<SpotifyCollectionItem>();
 
-            // The embed page stops at a hundred, so a long playlist is read through the web
-            // player's own API instead. That path can break in ways this one cannot - a rotated
-            // query hash, a moved secret - so the short answer stays as the floor beneath it.
+            // The embed page stops at a hundred; the web player API pages to the end but can break
+            // in ways this cannot, so it stays as the floor beneath it.
             var playlistId = PlaylistId(collectionUrl);
 
             if (playlistId is not null)

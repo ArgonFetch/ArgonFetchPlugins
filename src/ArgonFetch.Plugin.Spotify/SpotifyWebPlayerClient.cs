@@ -13,20 +13,8 @@ namespace ArgonFetch.Plugin.Spotify
         Task<IReadOnlyList<SpotifyCollectionItem>?> TryGetPlaylistTracksAsync(string playlistId, CancellationToken cancellationToken = default);
     }
 
-    /// <summary>
-    /// Reads playlists through the same API the Spotify web player uses.
-    /// <para>
-    /// The embed page carries at most a hundred entries and says nothing about what it left out,
-    /// so a 2,500-track playlist silently became a 100-track one. This asks the player's own
-    /// endpoint instead, which pages to the end.
-    /// </para>
-    /// <para>
-    /// No account and no credentials: the token minted here is anonymous, which is all that
-    /// reading a public playlist needs. Nothing is hardcoded either - the one-time-password
-    /// secret and the query hash both rotate, so both are fetched and cached rather than
-    /// embedded and left to go stale.
-    /// </para>
-    /// </summary>
+    // The embed page silently stops at a hundred entries. This pages to the end, with an
+    // anonymous token; the password secret and query hash both rotate, so both are fetched.
     public class SpotifyWebPlayerClient : ISpotifyWebPlayerClient
     {
         private const string SecretsUrl = "https://code.thetadev.de/ThetaDev/spotify-secrets/raw/branch/main/secrets/secretDict.json";
@@ -48,9 +36,8 @@ namespace ArgonFetch.Plugin.Spotify
             @"https://open\.spotifycdn\.com/cdn/build/web-player/[^""'\s]+\.js",
             RegexOptions.Compiled);
 
-        // The player itself, rather than the shorter agent used for media hosts: a request
-        // that does not look like a desktop browser is served the mobile page, which is laid
-        // out differently and carries no bundle this can read.
+        // Anything not looking like a desktop browser is served the mobile page, which
+        // carries no bundle this can read.
         private const string BrowserUserAgent =
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36";
 
@@ -166,7 +153,6 @@ namespace ArgonFetch.Plugin.Spotify
 
             if (document.RootElement.TryGetProperty("errors", out var errors) && errors.GetArrayLength() > 0)
             {
-                // A rotated hash reports itself here rather than as a failed request.
                 _logger.LogWarning("Spotify's playlist API reported: {Message}", errors[0].GetProperty("message").GetString());
                 return null;
             }
@@ -283,10 +269,7 @@ namespace ArgonFetch.Plugin.Spotify
             return await httpClient.GetAsync(url, cancellationToken);
         }
 
-        /// <summary>
-        /// The current one-time-password secret. Rotated by Spotify, so it is read from the
-        /// mirror that tracks it rather than written down here.
-        /// </summary>
+        // Rotated by Spotify, so it is read from a mirror rather than written down here.
         private async Task<(int Version, IReadOnlyList<int> Secret)> GetTotpSecretAsync(HttpClient httpClient, bool forceRefresh, CancellationToken cancellationToken)
         {
             if (!forceRefresh && _cache.TryGetValue(_context.CacheKey(SecretsCacheKey), out (int, IReadOnlyList<int>) cached))
@@ -316,10 +299,7 @@ namespace ArgonFetch.Plugin.Spotify
             return result;
         }
 
-        /// <summary>
-        /// Spotify's clock. The password is only valid for a thirty second window, so a server
-        /// whose own clock has drifted would otherwise mint codes that are refused.
-        /// </summary>
+        // The password is valid for thirty seconds, so a drifted clock mints refused codes.
         private async Task<long> GetSpotifyTimeAsync(HttpClient httpClient, CancellationToken cancellationToken)
         {
             try
