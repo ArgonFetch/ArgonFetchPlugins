@@ -1,0 +1,6 @@
+<Solution>
+  <Project Path="src/ArgonFetch.Plugin.Spotify/ArgonFetch.Plugin.Spotify.csproj" />
+  <Project Path="src/ArgonFetch.Plugin.TikTok/ArgonFetch.Plugin.TikTok.csproj" />
+  <Project Path="tests/ArgonFetch.Plugin.Spotify.Tests/ArgonFetch.Plugin.Spotify.Tests.csproj" />
+  <Project Path="tests/ArgonFetch.Plugin.TikTok.Tests/ArgonFetch.Plugin.TikTok.Tests.csproj" />
+</Solution>

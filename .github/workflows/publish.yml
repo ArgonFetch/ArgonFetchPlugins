@@ -1,0 +1,82 @@
+name: Build plugins and publish the index
+
+# Artifacts go to an orphan "repo" branch rather than to a release, which is how ArgonFetch
+# reads them: an index.json served raw from that branch, and the archives beside it. Nothing
+# needs hosting, and anyone can fork this repository and serve their own.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    name: Build, package and index
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      # The local feed is only for developing against a contract that has not been published
+      # yet. On a build machine there is nothing there, and the package comes from nuget.org.
+      - name: Remove the local development feed
+        run: rm -f nuget.config
+
+      - name: Test
+        run: dotnet test ArgonFetchPlugins.slnx -c Release
+
+      - name: Build every plugin
+        id: build
+        run: |
+          mkdir -p staging
+          ENTRIES=""
+
+          for project in src/*/; do
+            NAME=$(basename "$project")
+            ID=$(echo "$NAME" | sed 's/^ArgonFetch\.Plugin\.//' | tr '[:upper:]' '[:lower:]')
+            VERSION=$(grep -oPm1 '(?<=<PluginVersion>)[^<]+' "$project/$NAME.csproj" || echo "0.0.0")
+
+            echo "Packaging $ID $VERSION"
+
+            # ExcludeAssets on the contract keeps it out of here, which is what stops the plugin
+            # loading a second copy of the types the host is about to hand it.
+            dotnet publish "$project/$NAME.csproj" -c Release -o "staging/$ID" --nologo
+
+            if [ -f "staging/$ID/ArgonFetch.Abstractions.dll" ]; then
+              echo "::error::$ID ships ArgonFetch.Abstractions; it must reference it with ExcludeAssets=\"runtime\""
+              exit 1
+            fi
+
+            printf '%s' "$VERSION" > "staging/$ID/.version"
+
+            mkdir -p out/plugins
+            (cd "staging/$ID" && zip -qr "../../out/plugins/$ID-$VERSION.zip" .)
+
+            SHA=$(sha256sum "out/plugins/$ID-$VERSION.zip" | cut -d' ' -f1 | tr '[:lower:]' '[:upper:]')
+
+            ENTRIES="$ENTRIES{\"id\":\"$ID\",\"name\":\"$NAME\",\"version\":\"$VERSION\",\"abi\":1,\"file\":\"plugins/$ID-$VERSION.zip\",\"sha256\":\"$SHA\"},"
+          done
+
+          printf '[%s]' "${ENTRIES%,}" > out/index.json
+          cat out/index.json
+
+      - name: Publish to the repo branch
+        run: |
+          cd out
+          git init -q
+          git checkout -qb repo
+          git add -A
+          git -c user.name='github-actions[bot]' \
+              -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+              commit -qm "Plugins built from ${GITHUB_SHA::7}"
+          # Force, because this branch is a published artifact rather than a history: what it
+          # holds is whatever main last built, and older builds are of no use to anyone.
+          git push -qf "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${GITHUB_REPOSITORY}.git" repo
