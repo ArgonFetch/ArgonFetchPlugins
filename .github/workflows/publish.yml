@@ -25,8 +25,18 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
+      # Found rather than named: this workflow is copied into repositories whose solution is
+      # called something else, and a template nobody can rename is not much of a template.
       - name: Test
-        run: dotnet test ArgonFetchPlugins.slnx -c Release
+        run: |
+          SOLUTION=$(ls *.slnx *.sln 2>/dev/null | head -n1)
+
+          if [ -z "$SOLUTION" ]; then
+            echo "::error::No solution file in the repository root"
+            exit 1
+          fi
+
+          dotnet test "$SOLUTION" -c Release
 
       - name: Build every plugin
         id: build
