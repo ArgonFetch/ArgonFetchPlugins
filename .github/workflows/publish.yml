@@ -25,11 +25,6 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
-      # The local feed is only for developing against a contract that has not been published
-      # yet. On a build machine there is nothing there, and the package comes from nuget.org.
-      - name: Remove the local development feed
-        run: rm -f nuget.config
-
       - name: Test
         run: dotnet test ArgonFetchPlugins.slnx -c Release
 

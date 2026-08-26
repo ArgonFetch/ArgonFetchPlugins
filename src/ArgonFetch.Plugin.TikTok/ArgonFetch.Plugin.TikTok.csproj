@@ -20,8 +20,8 @@
 
   <ItemGroup>
     <!-- Referenced, never shipped: see the note in the Spotify plugin. -->
-    <PackageReference Include="ArgonFetch.Abstractions" Version="1.0.0-preview.2" ExcludeAssets="runtime" />
-    <PackageReference Include="AngleSharp" Version="1.3.0" />
+    <PackageReference Include="ArgonFetch.Abstractions" Version="1.0.1" ExcludeAssets="runtime" />
+    <PackageReference Include="AngleSharp" Version="1.7.2" />
   </ItemGroup>
 
 </Project>
