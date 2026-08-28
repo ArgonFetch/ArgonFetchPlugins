@@ -53,12 +53,24 @@ jobs:
 
             # ExcludeAssets on the contract keeps it out of here, which is what stops the plugin
             # loading a second copy of the types the host is about to hand it.
-            dotnet publish "$project/$NAME.csproj" -c Release -o "staging/$ID" --nologo
+            dotnet publish "$project/$NAME.csproj" -c Release -o "staging/$ID" --nologo \
+              -p:DebugType=none -p:GenerateDocumentationFile=false
 
             if [ -f "staging/$ID/ArgonFetch.Abstractions.dll" ]; then
               echo "::error::$ID ships ArgonFetch.Abstractions; it must reference it with ExcludeAssets=\"runtime\""
               exit 1
             fi
+
+            # Nothing loads these out of a plugin folder. runtimeconfig.json configures a host,
+            # and a plugin is loaded into one that already started; the assemblies below are
+            # resolved from the host by name, so a copy here is never opened. deps.json stays -
+            # AssemblyDependencyResolver reads it to find everything that is genuinely needed.
+            rm -f "staging/$ID"/*.pdb \
+                  "staging/$ID"/*.runtimeconfig.json \
+                  "staging/$ID"/*.xml \
+                  "staging/$ID"/Microsoft.Extensions.Logging.Abstractions.dll \
+                  "staging/$ID"/Microsoft.Extensions.Caching.Abstractions.dll \
+                  "staging/$ID"/Microsoft.Extensions.Primitives.dll
 
             printf '%s' "$VERSION" > "staging/$ID/.version"
 
