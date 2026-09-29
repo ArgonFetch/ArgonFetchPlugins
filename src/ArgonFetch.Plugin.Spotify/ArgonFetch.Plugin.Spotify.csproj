@@ -7,7 +7,7 @@
     <AssemblyName>ArgonFetch.Plugin.Spotify</AssemblyName>
 
     <!-- What the index publishes this build as. Raise it when the plugin changes. -->
-    <PluginVersion>1.0.0</PluginVersion>
+    <PluginVersion>1.0.1</PluginVersion>
 
     <!--
       Everything this plugin needs has to travel with it, since the host loads it from a folder
