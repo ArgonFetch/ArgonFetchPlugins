@@ -1,4 +1,4 @@
-using ArgonFetch.Plugin.Spotify;
+﻿using ArgonFetch.Plugin.Spotify;
 
 namespace ArgonFetch.Plugin.Spotify.Tests
 {
@@ -248,6 +248,29 @@ namespace ArgonFetch.Plugin.Spotify.Tests
             var ranked = YouTubeMusicMatcher.RankMatches([otherVersion, asked], wantTitle, wantArtist, durationMs: 0);
 
             Assert.Equal(asked, ranked.FirstOrDefault());
+        }
+
+        [Fact]
+        public void RankMatches_FindsTheReuploadOfATakenDownTrackOnTheVideoShelf()
+        {
+            // Real video-shelf rows for a track YouTube Music no longer carries as a song.
+            var reupload = new MatchCandidate("Waifu Jackson - Warteliste [REUPLOAD]", "Waifu Jackson REUPLOADS", 158);
+            var fanUpload = new MatchCandidate("Warteliste - Waifu Jackson", "Janissen", 157);
+            var nightcore = new MatchCandidate("warteliste - waifu jackson (speed up/nightcore)", "Melouite", 130);
+            var otherSong = new MatchCandidate("Waifu Jackson - Hotdog [REUPLOAD]", "Waifu Jackson REUPLOADS", 151);
+
+            var ranked = YouTubeMusicMatcher.RankMatches(
+                [otherSong, fanUpload, nightcore, reupload], "Warteliste", "Waifu Jackson", durationMs: 158_000);
+
+            Assert.Equal([reupload], ranked);
+        }
+
+        [Fact]
+        public void RankMatches_OffTheSongShelf_RefusesASameNamedSongBySomebodyElse()
+        {
+            var sameName = new MatchCandidate("Warteliste", "Stefan Kohler", 183);
+
+            Assert.Empty(YouTubeMusicMatcher.RankMatches([sameName], "Warteliste", "Waifu Jackson", durationMs: 158_000));
         }
 
         [Fact]
