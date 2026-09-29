@@ -274,6 +274,19 @@ namespace ArgonFetch.Plugin.Spotify.Tests
         }
 
         [Fact]
+        public void RankMatches_OnTheSongShelf_WaivesTheCreditOnlyForTheSameTitle()
+        {
+            // Real song-shelf rows for Waifu Jackson - Warteliste (155.8s), which has none by him.
+            var longerTitle = new MatchCandidate("THERAPEUTEN WARTELISTE", "Terfak, Inspektah, Hentzup", 166);
+            var sameTitle = new MatchCandidate("Warteliste", "Stefan Kohler", 183);
+
+            var ranked = YouTubeMusicMatcher.RankMatches(
+                [longerTitle, sameTitle], "Warteliste", "Waifu Jackson", durationMs: 155_809, officialShelf: true);
+
+            Assert.Equal([sameTitle], ranked);
+        }
+
+        [Fact]
         public void TitleScore_ReadsAQualifierTheCandidateKeepsInBrackets()
         {
             var want = YouTubeMusicMatcher.TitleWords("Sonne - Live Version");
