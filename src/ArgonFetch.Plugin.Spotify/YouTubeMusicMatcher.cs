@@ -56,7 +56,11 @@ namespace ArgonFetch.Plugin.Spotify
                 .ToList();
 
             var byArtist = titled.Where(c => ArtistMatches(c.Artist, wantArtistWords)).ToList();
-            var viable = officialShelf && byArtist.Count == 0 ? titled : byArtist;
+            // Waiving the credit is for a relabelled upload of the same title, not a longer
+            // title that merely contains it, like "Therapeuten Warteliste" for "Warteliste".
+            var viable = officialShelf && byArtist.Count == 0
+                ? titled.Where(c => ExtraWords(c.Title, askedTitleWords) == 0).ToList()
+                : byArtist;
 
             var ordered = viable.Select((candidate, index) => (candidate, index));
 
