@@ -265,6 +265,46 @@ namespace ArgonFetch.Plugin.Spotify.Tests
             Assert.Equal([reupload], ranked);
         }
 
+        // Real video-shelf rows for a track YouTube Music does not carry as a song, where no
+        // channel is the artist's own and only the titles say whose it is.
+        private static readonly MatchCandidate LostArk = new("Phoebe Bridgers - Waiting Room", "Lost Ark Studio", 394);
+        private static readonly MatchCandidate[] WaitingRoomVideos =
+        [
+            new("Phoebe Bridgers - Waiting Room (Lyrics)", "April ♡", 392),
+            new("Phoebe Bridgers - Waiting Room (Live on KEXP)", "KEXP", 269),
+            new("Phoebe Bridgers - Waiting Room (Official Music Video)", "Phoebe Bridgers Archive", 259),
+            LostArk,
+            new("Waiting Room", "Evan Honer", 99),
+        ];
+
+        [Fact]
+        public void RankMatches_WithCreditInTitle_FindsAFanUploadWhenNoChannelIsTheArtist()
+        {
+            var ranked = YouTubeMusicMatcher.RankMatches(
+                WaitingRoomVideos, "Waiting Room", "Phoebe Bridgers", durationMs: 393_962, creditInTitle: true);
+
+            Assert.Same(LostArk, ranked.First());
+        }
+
+        [Fact]
+        public void RankMatches_WithoutCreditInTitle_StillTrustsOnlyTheChannel()
+        {
+            Assert.Empty(YouTubeMusicMatcher.RankMatches(
+                WaitingRoomVideos, "Waiting Room", "Phoebe Bridgers", durationMs: 393_962));
+        }
+
+        [Theory]
+        [InlineData("Phoebe Bridgers - Waiting Room", "Phoebe Bridgers", true)]
+        [InlineData("Waiting Room - JATSKi", "VGC, JATSKi, Waifu Jackson", true)]
+        [InlineData("Phoebe - Waiting Room", "Phoebe Bridgers", false)]
+        [InlineData("Waiting Room", "Room", false)]
+        public void CreditedInTitle_NeedsOneArtistInFull_BeyondTheSongTitle(string title, string artist, bool expected)
+        {
+            var want = YouTubeMusicMatcher.TitleWords("Waiting Room");
+
+            Assert.Equal(expected, YouTubeMusicMatcher.CreditedInTitle(title, artist, want));
+        }
+
         [Fact]
         public void RankMatches_OffTheSongShelf_RefusesASameNamedSongBySomebodyElse()
         {

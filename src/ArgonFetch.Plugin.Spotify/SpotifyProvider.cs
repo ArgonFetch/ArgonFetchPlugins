@@ -98,9 +98,23 @@ namespace ArgonFetch.Plugin.Spotify
             IProviderContext context,
             CancellationToken cancellationToken)
         {
-            var results = (await client
+            IReadOnlyList<SearchResult> page;
+
+            try
+            {
+                page = await client
                     .SearchAsync(searchQuery, category)
-                    .FetchItemsAsync(0, SearchResultsToConsider, cancellationToken))
+                    .FetchItemsAsync(0, SearchResultsToConsider, cancellationToken);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // One row YouTubeMusicAPI cannot parse throws away the whole shelf; the other may still have it.
+                context.Logger.LogWarning(ex, "The {Category} shelf for '{Query}' could not be read", category, searchQuery);
+
+                return null;
+            }
+
+            var results = page
                 .Select(ToResult)
                 .OfType<ShelfResult>()
                 .ToList();
@@ -121,6 +135,14 @@ namespace ArgonFetch.Plugin.Spotify
                 var byCredit = YouTubeMusicMatcher.RankByCreditOnly(candidates, track.Artist, track.DurationMs);
 
                 found = await VerifyAsync(byCredit, candidates, ids, track, context, cancellationToken, requireDuration: true);
+            }
+
+            if (found is null && !officialShelf)
+            {
+                var byTitleCredit = YouTubeMusicMatcher.RankMatches(
+                    candidates, track.Title, track.Artist, track.DurationMs, creditInTitle: true);
+
+                found = await VerifyAsync(byTitleCredit, candidates, ids, track, context, cancellationToken, requireDuration: true);
             }
 
             return found;

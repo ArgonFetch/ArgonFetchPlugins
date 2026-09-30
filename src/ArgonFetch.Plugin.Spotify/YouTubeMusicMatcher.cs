@@ -39,7 +39,8 @@ namespace ArgonFetch.Plugin.Spotify
             string wantTitle,
             string wantArtist,
             long durationMs,
-            bool officialShelf = false)
+            bool officialShelf = false,
+            bool creditInTitle = false)
         {
             var want = TitleWords(wantTitle);
             var wantArtistWords = Words(RealArtist(wantArtist));
@@ -55,7 +56,9 @@ namespace ArgonFetch.Plugin.Spotify
                 !AddsRework($"{candidate.Title} {BracketedIn(candidate.Details)}", asked))
                 .ToList();
 
-            var byArtist = titled.Where(c => ArtistMatches(c.Artist, wantArtistWords)).ToList();
+            // A fan upload credits its channel, so the artist it carries is the one in its title.
+            var byArtist = titled.Where(c => ArtistMatches(c.Artist, wantArtistWords) ||
+                                             (creditInTitle && CreditedInTitle(c.Title, wantArtist, want))).ToList();
             // Waiving the credit is for a relabelled upload of the same title, not a longer
             // title that merely contains it, like "Therapeuten Warteliste" for "Warteliste".
             var viable = officialShelf && byArtist.Count == 0
@@ -115,6 +118,19 @@ namespace ArgonFetch.Plugin.Spotify
                 .Where(c => Math.Abs(c.DurationSec - wantSec) <= CreditOnlyToleranceSec)
                 .OrderBy(c => Math.Abs(c.DurationSec - wantSec))
                 .ToList();
+        }
+
+        // One credited artist named in full, and not only by words the song title has anyway.
+        internal static bool CreditedInTitle(string candidateTitle, string wantArtist, ISet<string> wantTitle)
+        {
+            var have = MarkerWords(candidateTitle);
+
+            return RealArtist(wantArtist)
+                .Split(',')
+                .Select(Words)
+                .Any(artist => artist.Count > 0 &&
+                               artist.All(have.Contains) &&
+                               !artist.All(wantTitle.Contains));
         }
 
         // Where duration cannot separate a radio edit from the album version, the plainest
