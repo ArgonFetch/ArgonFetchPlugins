@@ -31,8 +31,14 @@ namespace ArgonFetch.Plugin.Spotify
             if (segments.Contains("playlist") || segments.Contains("album"))
                 return await ListAsync(url, metadata, context, cancellationToken);
 
-            if (segments.Contains("track"))
-                return await FindRecordingAsync(url, metadata, context, cancellationToken);
+            var trackAt = Array.IndexOf(segments, "track");
+
+            if (trackAt >= 0)
+            {
+                var trackId = trackAt + 1 < segments.Length ? segments[trackAt + 1] : null;
+
+                return await FindRecordingAsync(url, trackId, metadata, context, cancellationToken);
+            }
 
             return ProviderOutcome.Declined;
         }
@@ -63,19 +69,31 @@ namespace ArgonFetch.Plugin.Spotify
 
         private async Task<ProviderOutcome> FindRecordingAsync(
             Uri url,
+            string? trackId,
             SpotifyMetadataService metadata,
             IProviderContext context,
             CancellationToken cancellationToken)
         {
+            if (trackId is not null && MatchStore.Find(trackId) is { } known)
+            {
+                return ProviderOutcome.Rewrite(
+                    WatchUrl(known.VideoId),
+                    new MediaTags(known.Title, known.Artist),
+                    known.CoverUrl);
+            }
+
             var track = await metadata.GetTrackAsync(url.ToString(), cancellationToken);
             var searchQuery = YouTubeMusicMatcher.SearchQuery(track.Artist, track.Title);
 
             var client = new YouTubeMusicClient();
 
-            var found = await SearchShelfAsync(client, SearchCategory.Songs, searchQuery, track, context, cancellationToken);
+            // Taken-down tracks survive only as reuploads, which sit on the video shelf. It is read
+            // alongside the song shelf, because waiting to need it costs a round trip.
+            var songs = ReadShelfAsync(client, SearchCategory.Songs, searchQuery, context, cancellationToken);
+            var videos = ReadShelfAsync(client, SearchCategory.Videos, searchQuery, context, cancellationToken);
 
-            // Taken-down tracks survive only as reuploads, which sit on the video shelf.
-            found ??= await SearchShelfAsync(client, SearchCategory.Videos, searchQuery, track, context, cancellationToken);
+            var found = await MatchShelfAsync(await songs, officialShelf: true, track, context, cancellationToken)
+                     ?? await MatchShelfAsync(await videos, officialShelf: false, track, context, cancellationToken);
 
             if (found is null)
             {
@@ -84,25 +102,27 @@ namespace ArgonFetch.Plugin.Spotify
                 return ProviderOutcome.Declined;
             }
 
+            if (trackId is not null)
+                MatchStore.Remember(trackId, new StoredMatch(found, track.Title, track.Artist, track.CoverUrl));
+
             return ProviderOutcome.Rewrite(
-                found,
+                WatchUrl(found),
                 new MediaTags(track.Title, track.Artist),
                 track.CoverUrl);
         }
 
-        private static async Task<Uri?> SearchShelfAsync(
+        private static Uri WatchUrl(string videoId) => new($"https://music.youtube.com/watch?v={videoId}");
+
+        private static async Task<IReadOnlyList<SearchResult>> ReadShelfAsync(
             YouTubeMusicClient client,
             SearchCategory category,
             string searchQuery,
-            SpotifyTrackMetadata track,
             IProviderContext context,
             CancellationToken cancellationToken)
         {
-            IReadOnlyList<SearchResult> page;
-
             try
             {
-                page = await client
+                return await client
                     .SearchAsync(searchQuery, category)
                     .FetchItemsAsync(0, SearchResultsToConsider, cancellationToken);
             }
@@ -111,9 +131,17 @@ namespace ArgonFetch.Plugin.Spotify
                 // One row YouTubeMusicAPI cannot parse throws away the whole shelf; the other may still have it.
                 context.Logger.LogWarning(ex, "The {Category} shelf for '{Query}' could not be read", category, searchQuery);
 
-                return null;
+                return [];
             }
+        }
 
+        private static async Task<string?> MatchShelfAsync(
+            IReadOnlyList<SearchResult> page,
+            bool officialShelf,
+            SpotifyTrackMetadata track,
+            IProviderContext context,
+            CancellationToken cancellationToken)
+        {
             var results = page
                 .Select(ToResult)
                 .OfType<ShelfResult>()
@@ -123,8 +151,6 @@ namespace ArgonFetch.Plugin.Spotify
             var ids = results.Select(result => result.Id).ToList();
 
             // Anyone can upload a video, so only the song shelf may waive the credit.
-            var officialShelf = category == SearchCategory.Songs;
-
             var ranked = YouTubeMusicMatcher.RankMatches(
                 candidates, track.Title, track.Artist, track.DurationMs, officialShelf);
 
@@ -164,7 +190,7 @@ namespace ArgonFetch.Plugin.Spotify
             _ => null,
         };
 
-        private static async Task<Uri?> VerifyAsync(
+        private static async Task<string?> VerifyAsync(
             IReadOnlyList<MatchCandidate> ranked,
             IReadOnlyList<MatchCandidate> candidates,
             IReadOnlyList<string> ids,
@@ -173,7 +199,7 @@ namespace ArgonFetch.Plugin.Spotify
             CancellationToken cancellationToken,
             bool requireDuration = false)
         {
-            Uri? first = null;
+            string? first = null;
 
             foreach (var candidate in ranked.Take(MaxVerificationAttempts))
             {
@@ -182,19 +208,22 @@ namespace ArgonFetch.Plugin.Spotify
                 if (index < 0)
                     continue;
 
-                var url = new Uri($"https://music.youtube.com/watch?v={ids[index]}");
+                var id = ids[index];
 
-                var probe = await context.ProbeAsync(url, cancellationToken);
+                // The shelf lists the length of this very video, so yt-dlp is asked only when it does not.
+                var seconds = candidate.DurationSec > 0
+                    ? candidate.DurationSec
+                    : (await context.ProbeAsync(WatchUrl(id), cancellationToken))?.DurationSeconds;
 
-                if (probe?.DurationSeconds is not > 0 || track.DurationMs <= 0)
+                if (seconds is not > 0 || track.DurationMs <= 0)
                 {
-                    first ??= url;
+                    first ??= id;
                     continue;
                 }
 
                 // A measured length that disagrees is a different recording, never a fallback.
-                if (Math.Abs(probe.DurationSeconds.Value - track.DurationMs / 1000.0) <= VerificationToleranceSec)
-                    return url;
+                if (Math.Abs(seconds.Value - track.DurationMs / 1000.0) <= VerificationToleranceSec)
+                    return id;
             }
 
             return requireDuration ? null : first;

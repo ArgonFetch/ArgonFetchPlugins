@@ -53,6 +53,9 @@ namespace ArgonFetch.Plugin.Spotify
 
             var httpClient = _context.CreateHttpClient(rotateProxy: false);
 
+            // The embed page carries the length the track page lacks; both are asked at once.
+            var duration = TryGetDurationMsAsync(requestUrl, httpClient, cancellationToken);
+
             using var response = await httpClient.GetAsync(requestUrl, cancellationToken);
 
             if (!response.IsSuccessStatusCode)
@@ -84,7 +87,7 @@ namespace ArgonFetch.Plugin.Spotify
                     requestUrl, description);
             }
 
-            var durationMs = await TryGetDurationMsAsync(requestUrl, httpClient, cancellationToken);
+            var durationMs = await duration;
 
             return new SpotifyTrackMetadata(title, artist ?? string.Empty, coverUrl, durationMs);
         }
@@ -120,6 +123,9 @@ namespace ArgonFetch.Plugin.Spotify
         {
             var httpClient = _context.CreateHttpClient(rotateProxy: false);
 
+            // Only the full page carries the cover, so it is read while the listing is.
+            var cover = TryGetCoverUrlAsync(collectionUrl, httpClient, cancellationToken);
+
             using var response = await httpClient.GetAsync(EmbedUrl(collectionUrl), cancellationToken);
 
             if (!response.IsSuccessStatusCode)
@@ -146,7 +152,7 @@ namespace ArgonFetch.Plugin.Spotify
                     return new SpotifyCollectionMetadata(
                         Text(entity, "name") ?? Text(entity, "title") ?? "Unknown",
                         Text(entity, "subtitle"),
-                        await TryGetCoverUrlAsync(collectionUrl, httpClient, cancellationToken),
+                        await cover,
                         full,
                         MayBeTruncated: false);
                 }
@@ -177,7 +183,7 @@ namespace ArgonFetch.Plugin.Spotify
             if (items.Count == 0)
                 throw new ArgumentException($"Spotify listed no tracks for {collectionUrl}.");
 
-            var coverUrl = await TryGetCoverUrlAsync(collectionUrl, httpClient, cancellationToken);
+            var coverUrl = await cover;
 
             return new SpotifyCollectionMetadata(
                 Text(entity, "name") ?? Text(entity, "title") ?? "Unknown",
